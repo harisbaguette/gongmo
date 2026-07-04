@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b63f6" />
+  <meta name="description" content="공모주 청약 진입 판단 — 38.co.kr 데이터 기반 등급 계산" />
+  <title>공모주 계산기</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icons/favicon.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-row">
+      <h1>📊 공모주 계산기</h1>
+      <div class="header-actions">
+        <button id="btn-theme" class="icon-btn" title="다크모드 전환" aria-label="다크모드 전환">🌙</button>
+        <button id="btn-push" class="icon-btn" title="알림 구독" aria-label="알림 구독">🔔</button>
+      </div>
+    </div>
+    <div class="meta-row">
+      <span id="last-updated" class="muted">불러오는 중…</span>
+      <button id="btn-refresh" class="text-btn">↻ 새로고침</button>
+    </div>
+  </header>
+
+  <nav class="filters" aria-label="필터">
+    <div class="filter-group" id="verdict-filters">
+      <button class="chip active" data-verdict="all">전체</button>
+      <button class="chip" data-verdict="퍼펙트">퍼펙트</button>
+      <button class="chip" data-verdict="청약 고려">청약 고려</button>
+      <button class="chip" data-verdict="진입 X">진입 X</button>
+      <button class="chip" data-verdict="판정 대기">판정 대기</button>
+    </div>
+    <div class="filter-group">
+      <label class="toggle"><input type="checkbox" id="hide-spac" /> 스팩 제외</label>
+      <label class="toggle"><input type="checkbox" id="only-upcoming" /> 청약 예정만</label>
+    </div>
+  </nav>
+
+  <main id="list" class="list" aria-live="polite">
+    <div class="empty">데이터를 불러오는 중…</div>
+  </main>
+
+  <footer class="app-footer muted">
+    <p>데이터 출처: 38커뮤니케이션(38.co.kr) · 본 앱의 판정은 참고용이며 투자 판단의 책임은 본인에게 있습니다.</p>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
