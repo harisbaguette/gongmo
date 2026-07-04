@@ -5,14 +5,36 @@ const state = {
   verdict: 'all',
   hideSpac: false,
   onlyUpcoming: false,
+  recommendOnly: false, // 앱 바로가기 '추천 종목'(퍼펙트·청약 고려)용
   vapidPublicKey: null,
 };
+
+const NEW_WINDOW_MS = 2 * 24 * 60 * 60 * 1000; // 최근 2일 내 등재 = '신규'
+
+// SQLite datetime('now')(UTC, 'YYYY-MM-DD HH:MM:SS') → 최근 등재 여부
+function isNew(ipo) {
+  if (!ipo.createdAt) return false;
+  const t = Date.parse(ipo.createdAt.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t <= NEW_WINDOW_MS;
+}
 
 const $ = (sel) => document.querySelector(sel);
 const listEl = $('#list');
 const toastEl = $('#toast');
 
 // ── 유틸 ──────────────────────────────────────────────
+// innerHTML 삽입 전 HTML 특수문자 이스케이프 (스크래핑 문자열 XSS 방지)
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function toast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.add('show');
@@ -56,6 +78,7 @@ function priceValue(ipo) {
 function cardHtml(ipo) {
   const g = ipo.grade;
   const spac = ipo.isSpac ? '<span class="spac-tag">스팩</span>' : '';
+  const fresh = isNew(ipo) ? '<span class="new-tag">신규</span>' : '';
   const sched =
     ipo.subscribeStart && ipo.subscribeEnd
       ? `청약 ${ipo.subscribeStart} ~ ${ipo.subscribeEnd}`
@@ -65,7 +88,7 @@ function cardHtml(ipo) {
   <a class="card" href="${ipo.detailUrl}" target="_blank" rel="noopener">
     <div class="card-top">
       <div>
-        <div class="card-name">${ipo.name}${spac}</div>
+        <div class="card-name">${escapeHtml(ipo.name)}${spac}${fresh}</div>
         <div class="card-sched">${sched}${listing}</div>
       </div>
       <span class="verdict" data-v="${g.verdict}">${g.verdict}</span>
@@ -76,7 +99,7 @@ function cardHtml(ipo) {
       ${metric('청약경쟁률', fmtRate(ipo.subscriptionRate), g.subscription)}
       ${metric('의무보유확약', fmtPct(ipo.lockupRatio), g.lockup)}
       ${metric('유통가능물량', fmtPct(ipo.floatRatio), g.float)}
-      ${metric('주간사', ipo.underwriter ?? '-')}
+      ${metric('주간사', escapeHtml(ipo.underwriter ?? '-'))}
     </div>
   </a>`;
 }
@@ -84,6 +107,8 @@ function cardHtml(ipo) {
 function applyFilters(list) {
   const today = todayStr();
   return list.filter((ipo) => {
+    if (state.recommendOnly && ipo.grade.verdict !== '퍼펙트' && ipo.grade.verdict !== '청약 고려')
+      return false;
     if (state.verdict !== 'all' && ipo.grade.verdict !== state.verdict) return false;
     if (state.hideSpac && ipo.isSpac) return false;
     if (state.onlyUpcoming) {
@@ -140,6 +165,7 @@ $('#verdict-filters').addEventListener('click', (e) => {
   document.querySelectorAll('#verdict-filters .chip').forEach((c) => c.classList.remove('active'));
   btn.classList.add('active');
   state.verdict = btn.dataset.verdict;
+  state.recommendOnly = false; // 수동 판정 필터는 바로가기 '추천' 필터를 해제
   render();
 });
 $('#hide-spac').addEventListener('change', (e) => {
@@ -277,6 +303,19 @@ async function initPushState() {
   }
 }
 
+// ── 앱 바로가기(App Shortcuts) 딥링크 필터 적용 ─────────
+// manifest.json 의 shortcuts(/?filter=upcoming|recommend)를 실제 필터로 반영
+function applyShortcutFilter() {
+  const filter = new URLSearchParams(location.search).get('filter');
+  if (filter === 'upcoming') {
+    state.onlyUpcoming = true;
+    const cb = $('#only-upcoming');
+    if (cb) cb.checked = true;
+  } else if (filter === 'recommend') {
+    state.recommendOnly = true;
+  }
+}
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker
     .register('/sw.js')
@@ -286,4 +325,5 @@ if ('serviceWorker' in navigator) {
   $('#btn-push').style.display = 'none';
 }
 
+applyShortcutFilter();
 load();
