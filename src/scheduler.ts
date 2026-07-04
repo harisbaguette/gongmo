@@ -63,7 +63,9 @@ export async function runDailyNotifications(today = todayKst()): Promise<number>
     for (const j of jobs) {
       if (wasNotified(ipo.id, j.kind)) continue;
       const r = await sendToAll({ title: j.title, body: j.body, url: ipo.detailUrl, tag: j.kind });
-      if (r.sent > 0 || r.failed >= 0) markNotified(ipo.id, j.kind);
+      // 실제 발송을 시도한 경우(성공 또는 실패)에만 발송 기록.
+      // VAPID 미설정·구독자 0명(sent=0,failed=0)이면 기록하지 않아 이후 재발송 가능.
+      if (r.sent > 0 || r.failed > 0) markNotified(ipo.id, j.kind);
       sent += r.sent;
     }
   }
@@ -86,7 +88,8 @@ export async function runDeadlineNotifications(today = todayKst()): Promise<numb
       url: ipo.detailUrl,
       tag: kind,
     });
-    markNotified(ipo.id, kind);
+    // 실제 발송 시도(성공/실패)가 있을 때만 기록 — VAPID 미설정 시 재발송 여지 보존
+    if (r.sent > 0 || r.failed > 0) markNotified(ipo.id, kind);
     sent += r.sent;
   }
   return sent;

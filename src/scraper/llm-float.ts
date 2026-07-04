@@ -10,8 +10,12 @@ const SYSTEM_PROMPT = [
   '값을 확신할 수 없으면 floatRatio 를 null 로 둔다.',
 ].join('\n');
 
-/** 응답 문자열에서 JSON 추출 → floatRatio */
-function parseFloatFromContent(content: string): number | null {
+/**
+ * 응답 문자열에서 JSON 추출 → floatRatio.
+ * 유통가능물량 지분율은 0~100% 범위여야 한다. LLM 이 소수점 누락(예: 3319)·음수·
+ * 100 초과 같은 이상값을 뱉으면 등급을 오염시키므로 폐기(null)한다.
+ */
+export function parseFloatFromContent(content: string): number | null {
   // 코드펜스/잡텍스트 제거 후 첫 JSON 객체 파싱
   const jsonMatch = content.match(/\{[\s\S]*?\}/);
   if (!jsonMatch) return null;
@@ -20,7 +24,10 @@ function parseFloatFromContent(content: string): number | null {
     const v = obj.floatRatio;
     if (v == null) return null;
     const n = typeof v === 'number' ? v : Number(String(v).replace(/[%\s]/g, ''));
-    return Number.isFinite(n) ? n : null;
+    if (!Number.isFinite(n)) return null;
+    // 지분율 범위 검증: 0~100% 밖이면 이상값으로 간주해 폐기
+    if (n < 0 || n > 100) return null;
+    return n;
   } catch {
     return null;
   }

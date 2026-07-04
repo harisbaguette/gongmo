@@ -75,15 +75,26 @@ export function getMeta(key: string): string | null {
 }
 
 // ── IPO upsert ─────────────────────────────────────────
-/** 리스트에서 얻은 필드로 신규 삽입 또는 변동 필드만 갱신 */
-export function upsertFromList(e: ListEntry): void {
+/**
+ * 리스트에서 얻은 필드로 신규 삽입 또는 변동 필드만 갱신.
+ * @returns 이번 호출에서 신규로 삽입되었으면 true (기존 갱신이면 false)
+ */
+export function upsertFromList(e: ListEntry): boolean {
   const exists = db.prepare('SELECT id FROM ipos WHERE id = ?').get(e.id);
   if (exists) {
+    // 확정가·경쟁률·밴드는 한 번 확정되면 유지되는 값 → 목록이 일시적으로 "-"(null)로
+    // 오더라도 기존 값을 지우지 않도록 COALESCE 로 보존(확정가 발표 후 회귀 방지).
     db.prepare(
       `UPDATE ipos SET
-        name = ?, is_spac = ?, subscribe_start = ?, subscribe_end = ?,
-        confirmed_price = ?, band_low = ?, band_high = ?, subscription_rate = ?,
-        underwriter = ?, detail_url = ?, updated_at = datetime('now')
+        name = ?, is_spac = ?,
+        subscribe_start = COALESCE(?, subscribe_start),
+        subscribe_end = COALESCE(?, subscribe_end),
+        confirmed_price = COALESCE(?, confirmed_price),
+        band_low = COALESCE(?, band_low),
+        band_high = COALESCE(?, band_high),
+        subscription_rate = COALESCE(?, subscription_rate),
+        underwriter = COALESCE(?, underwriter),
+        detail_url = ?, updated_at = datetime('now')
        WHERE id = ?`,
     ).run(
       e.name,
@@ -98,6 +109,7 @@ export function upsertFromList(e: ListEntry): void {
       e.detailUrl,
       e.id,
     );
+    return false;
   } else {
     db.prepare(
       `INSERT INTO ipos
@@ -117,6 +129,7 @@ export function upsertFromList(e: ListEntry): void {
       e.underwriter,
       e.detailUrl,
     );
+    return true;
   }
 }
 
