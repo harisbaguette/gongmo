@@ -24,6 +24,8 @@
     }
   ],
   "crons": [
-    { "path": "/api/cron/scrape", "schedule": "0 22 * * *" }
+    { "path": "/api/cron/scrape", "schedule": "0 22 * * *" },
+    { "path": "/api/cron/notify-morning", "schedule": "30 23 * * *" },
+    { "path": "/api/cron/notify-deadline", "schedule": "0 6 * * *" }
   ]
 }
