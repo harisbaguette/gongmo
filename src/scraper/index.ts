@@ -1,16 +1,24 @@
 // 스크래핑 오케스트레이션: 목록 → 상세 → LLM → DB 적재
 import { config } from '../config.js';
-import { markNotified, setMeta, updateDetail, upsertFromList, wasNotified } from '../db.js';
+import {
+  getAllIpos,
+  markNotified,
+  setMeta,
+  updateDetail,
+  upsertFromList,
+  wasNotified,
+} from '../db.js';
 import { sendToAll } from '../push.js';
 import { delay, fetchEucKr } from './fetch.js';
 import { extractFloatRatio } from './llm-float.js';
 import { parseDetailHtml } from './parse-detail.js';
 import { parseListHtml } from './parse-list.js';
-import type { ListEntry } from '../types.js';
+import type { IpoRow, ListEntry } from '../types.js';
 
 export interface ScrapeResult {
   listCount: number;
   newCount: number;
+  detailTargets: number;
   detailOk: number;
   detailFail: number;
   floatOk: number;
@@ -20,14 +28,32 @@ export interface ScrapeResult {
 }
 
 /**
+ * 상세 수집 순서 최적화: 상세 데이터(상장일·기관경쟁률·유통물량)가 아직 비어 있는
+ * 종목을 먼저 처리해, 배치 상한에 걸려도 신규·미완성 종목이 우선 채워지게 한다.
+ */
+function prioritizeTargets(entries: ListEntry[], existing: IpoRow[]): ListEntry[] {
+  const byId = new Map(existing.map((r) => [r.id, r]));
+  const isIncomplete = (e: ListEntry): boolean => {
+    const row = byId.get(e.id);
+    if (!row) return true; // 신규 = 최우선
+    return row.listingDate == null || row.institutionalRate == null || row.floatRatio == null;
+  };
+  // 미완성 우선, 그 안에서는 원래 순서(대체로 최신) 유지 — 안정 정렬
+  return [...entries].sort((a, b) => Number(isIncomplete(b)) - Number(isIncomplete(a)));
+}
+
+/**
  * 신규 등재 종목 알림. 이번 수집에서 처음 나타난 종목을 구독자에게 1건으로 묶어 발송.
  * 종목별 `new:<id>` 로그로 중복 발송을 막는다(재수집·재시작에도 재발송 안 함).
  */
 async function notifyNewListings(newEntries: ListEntry[]): Promise<void> {
-  const fresh = newEntries.filter((e) => !wasNotified(e.id, `new:${e.id}`));
+  const fresh: ListEntry[] = [];
+  for (const e of newEntries) {
+    if (!(await wasNotified(e.id, `new:${e.id}`))) fresh.push(e);
+  }
   if (fresh.length === 0) return;
   // 중복 방지 로그는 발송 성공 여부와 무관하게 먼저 확정(구독자 0명이어도 재발송 방지)
-  for (const e of fresh) markNotified(e.id, `new:${e.id}`);
+  for (const e of fresh) await markNotified(e.id, `new:${e.id}`);
 
   const names = fresh
     .slice(0, 3)
@@ -52,6 +78,7 @@ async function notifyNewListings(newEntries: ListEntry[]): Promise<void> {
  */
 export async function runScrape(opts: {
   detailLimit?: number;
+  detailBatch?: number;
   onProgress?: (msg: string) => void;
 } = {}): Promise<ScrapeResult> {
   const startedAt = new Date().toISOString();
@@ -62,13 +89,20 @@ export async function runScrape(opts: {
   const entries = parseListHtml(listHtml);
   log(`목록 ${entries.length}건 파싱`);
 
+  // upsert 이전 상태를 읽어 신규/미완성 우선순위 판단에 사용
+  const existingBefore = await getAllIpos();
+
   const newEntries: ListEntry[] = [];
   for (const e of entries) {
-    if (upsertFromList(e)) newEntries.push(e);
+    if (await upsertFromList(e)) newEntries.push(e);
   }
   if (newEntries.length > 0) log(`신규 등재 ${newEntries.length}건`);
 
-  const targets = opts.detailLimit ? entries.slice(0, opts.detailLimit) : entries;
+  // 상세 수집 대상: 미완성 우선 정렬 → 배치 상한(서버리스 300초 대응) 적용
+  const ordered = prioritizeTargets(entries, existingBefore);
+  const batch = opts.detailBatch ?? config.scrape.detailBatch;
+  const capped = opts.detailLimit ? ordered.slice(0, opts.detailLimit) : ordered.slice(0, batch);
+  const targets = capped;
   let detailOk = 0;
   let detailFail = 0;
   let floatOk = 0;
@@ -84,7 +118,7 @@ export async function runScrape(opts: {
       if (floatRatio == null) floatNull++;
       else floatOk++;
 
-      updateDetail(e.id, {
+      await updateDetail(e.id, {
         listingDate: detail.listingDate,
         institutionalRate: detail.institutionalRate,
         lockupRatio: detail.lockupRatio,
@@ -106,12 +140,13 @@ export async function runScrape(opts: {
   }
 
   const finishedAt = new Date().toISOString();
-  setMeta('last_scrape_at', finishedAt);
-  setMeta(
+  await setMeta('last_scrape_at', finishedAt);
+  await setMeta(
     'last_scrape_summary',
     JSON.stringify({
       listCount: entries.length,
       newCount: newEntries.length,
+      detailTargets: targets.length,
       detailOk,
       detailFail,
       floatOk,
@@ -122,6 +157,7 @@ export async function runScrape(opts: {
   return {
     listCount: entries.length,
     newCount: newEntries.length,
+    detailTargets: targets.length,
     detailOk,
     detailFail,
     floatOk,

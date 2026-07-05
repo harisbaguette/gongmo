@@ -22,11 +22,16 @@ function bool(key: string, fallback = false): boolean {
 export const config = {
   port: num('PORT', 3000),
   adminToken: str('ADMIN_TOKEN'),
+  // 스케줄러 엔드포인트(/api/cron/*) 보호용 Bearer 시크릿
+  cronSecret: str('CRON_SECRET'),
   timezone: 'Asia/Seoul',
 
   scrape: {
     cron: str('SCRAPE_CRON', '0 7 * * *'),
-    delayMs: num('SCRAPE_DELAY_MS', 1500),
+    // 서버리스 함수 300초 제한 대응: 상세 요청 간 딜레이 축소(기본 800ms)
+    delayMs: num('SCRAPE_DELAY_MS', 800),
+    // 1회 호출당 상세+LLM 처리 최대 건수(나머지는 다음 호출에서 이어서 처리)
+    detailBatch: num('SCRAPE_DETAIL_BATCH', 80),
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ipo-calculator/1.0 (personal-use)',
     listUrl: 'https://www.38.co.kr/html/fund/index.htm?o=k',
@@ -62,4 +67,9 @@ export function isPushConfigured(): boolean {
 /** OpenRouter 사용 가능 여부 */
 export function isLlmConfigured(): boolean {
   return Boolean(config.openRouter.apiKey && config.openRouter.apiKey.startsWith('sk-'));
+}
+
+/** cron 시크릿 설정 여부 */
+export function isCronConfigured(): boolean {
+  return Boolean(config.cronSecret);
 }

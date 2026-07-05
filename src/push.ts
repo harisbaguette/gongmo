@@ -30,7 +30,7 @@ export async function sendToAll(payload: PushPayload): Promise<{ sent: number; f
     console.warn('[push] VAPID 미설정 — 발송 건너뜀');
     return { sent: 0, failed: 0 };
   }
-  const subs = getSubscriptions();
+  const subs = await getSubscriptions();
   let sent = 0;
   let failed = 0;
   const data = JSON.stringify(payload);
@@ -47,7 +47,7 @@ export async function sendToAll(payload: PushPayload): Promise<{ sent: number; f
         failed++;
         const statusCode = (err as { statusCode?: number }).statusCode;
         if (statusCode === 404 || statusCode === 410) {
-          deleteSubscription(s.endpoint); // 만료 구독 제거
+          await deleteSubscription(s.endpoint); // 만료 구독 제거
         }
       }
     }),

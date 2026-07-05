@@ -1,7 +1,7 @@
 {
   "name": "ipo-calculator",
   "version": "1.0.0",
-  "description": "공모주 청약 진입 판단 PWA — 38.co.kr 수집·등급 계산·웹푸시 알림",
+  "description": "공모주 청약 진입 판단 PWA — 38.co.kr 수집·등급 계산·웹푸시 알림 (Neon + Vercel 서버리스)",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -18,19 +18,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "@neondatabase/serverless": "^0.10.4",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "iconv-lite": "^0.6.3",
-    "node-cron": "^3.0.3",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
+    "@electric-sql/pglite": "^0.2.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.5",
-    "@types/node-cron": "^3.0.11",
     "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
     "@typescript-eslint/parser": "^8.19.1",
