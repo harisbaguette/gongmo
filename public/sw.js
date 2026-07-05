@@ -9,7 +9,7 @@
 //
 // CACHE_VERSION 은 SWR 덕분에 배포마다 손대지 않아도 자산이 갱신되지만,
 // 구조가 크게 바뀌어 즉시 전체 무효화가 필요할 때 이 숫자만 올리면 activate 가 구캐시를 모두 지운다.
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE = `ipo-calc-${CACHE_VERSION}`;
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icons/icon-192.png'];
 

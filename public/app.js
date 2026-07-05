@@ -104,11 +104,20 @@ function isNew(ipo) {
   return Date.now() - t <= NEW_WINDOW_MS;
 }
 
+// start <= 오늘 <= end (청약 진행 중)
 function isSubscribing(ipo) {
   const today = todayDate();
   const s = parseDate(ipo.subscribeStart);
   const e = parseDate(ipo.subscribeEnd);
-  return !!(s && e && today >= s && today <= e);
+  if (e && today > e) return false;
+  if (s) return today >= s; // 시작 지남 = 진행 중 (end 이내)
+  return true; // 시작일 미상이나 아직 마감 전 → 진행 중으로 간주
+}
+
+// 오늘 < 청약 시작 (예정)
+function isUpcoming(ipo) {
+  const s = parseDate(ipo.subscribeStart);
+  return !!(s && todayDate() < s);
 }
 
 // ── 상태 계산 ─────────────────────────────────────────
@@ -125,7 +134,7 @@ function scheduleChip(ipo, tab) {
       const dToEnd = daysBetween(today, end);
       if (start && daysBetween(today, start) === 0) return { label: '오늘 청약', tone: 'positive' };
       if (dToEnd === 0) return { label: '오늘 마감', tone: 'positive' };
-      if (dToEnd > 0) return { label: `청약 마감 D-${dToEnd}`, tone: 'positive' };
+      if (dToEnd > 0) return { label: `마감 D-${dToEnd}`, tone: 'positive' };
     }
     return { label: '청약중', tone: 'positive' };
   }
@@ -145,33 +154,31 @@ function verdictTone(v) {
   return 'muted'; // 진입 X
 }
 
-// ── 렌더 ──────────────────────────────────────────────
-function dot(tier) {
+// ── 렌더: 청약 탭 카드 ───────────────────────────────
+function gradeBadge(tier) {
   const t = tier ?? '미확인';
-  return `<span class="dot dot-${escapeHtml(t)}" aria-hidden="true"></span>`;
+  return `<span class="g-badge g-${escapeHtml(t)}">${escapeHtml(t)}</span>`;
 }
 
-function detailRow(k, valueHtml, tier) {
-  const tierHtml = tier !== undefined ? dot(tier) : '';
-  return `<div class="more-row"><span class="more-k">${k}</span><span class="more-v">${tierHtml}${valueHtml}</span></div>`;
+function metricRow(label, valueHtml, tier) {
+  return `<tr><th scope="row">${label}</th><td>${valueHtml}</td><td>${gradeBadge(tier)}</td></tr>`;
 }
 
 function cardHtml(ipo) {
   const g = ipo.grade;
-  const chip = scheduleChip(ipo, state.tab);
+  const chip = scheduleChip(ipo, 'active');
   const tags =
     (isNew(ipo) ? '<span class="tag tag-new">신규</span>' : '') +
     (ipo.isSpac ? '<span class="tag tag-spac">스팩</span>' : '');
-  const sub =
-    state.tab === 'active'
-      ? fmtRange(ipo.subscribeStart, ipo.subscribeEnd)
-      : `상장 ${fmtDay(ipo.listingDate) || '미정'}`;
   const url = safeUrl(ipo.detailUrl);
-  const link = url
-    ? `<a class="more-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">38.co.kr에서 보기
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
-      </a>`
-    : '';
+  const metaParts = [];
+  if (ipo.underwriter) metaParts.push(escapeHtml(ipo.underwriter));
+  metaParts.push(`상장 ${fmtDay(ipo.listingDate) || '미정'}`);
+  if (url) {
+    metaParts.push(
+      `<a class="meta-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">38.co.kr</a>`,
+    );
+  }
   return `
   <article class="card">
     <div class="card-head">
@@ -184,74 +191,104 @@ function cardHtml(ipo) {
     <div class="card-price-row">
       <div class="price">
         <span class="price-val">${fmtNum(ipo.confirmedPrice)}<span class="price-unit">원</span></span>
-        <span class="price-sub">${sub}</span>
+        <span class="price-sub">${fmtRange(ipo.subscribeStart, ipo.subscribeEnd)}</span>
       </div>
       <span class="verdict tone-${verdictTone(g.verdict)}">${escapeHtml(g.verdict)}</span>
     </div>
-    <div class="card-summary">
-      <span class="sum-item">${dot(g.institutional)}<span class="sum-k">기관경쟁률</span><span class="sum-v">${fmtRate(ipo.institutionalRate)}</span></span>
-      <span class="sum-item">${dot(g.lockup)}<span class="sum-k">의무보유확약</span><span class="sum-v">${fmtPct(ipo.lockupRatio)}</span></span>
-    </div>
-    <details class="card-more">
-      <summary>자세히</summary>
-      <div class="more-grid">
-        ${detailRow('청약경쟁률', fmtRate(ipo.subscriptionRate), g.subscription)}
-        ${detailRow('유통가능물량', fmtPct(ipo.floatRatio), g.float)}
-        ${detailRow('주간사', escapeHtml(ipo.underwriter ?? '-'))}
-        ${detailRow('상장일', fmtDay(ipo.listingDate) || '미정')}
-      </div>
-      ${link}
-    </details>
+    <table class="metrics-table">
+      <thead><tr><th scope="col">지표</th><th scope="col">값</th><th scope="col">등급</th></tr></thead>
+      <tbody>
+        ${metricRow('기관경쟁률', fmtRate(ipo.institutionalRate), g.institutional)}
+        ${metricRow('청약경쟁률', fmtRate(ipo.subscriptionRate), g.subscription)}
+        ${metricRow('의무보유확약', fmtPct(ipo.lockupRatio), g.lockup)}
+        ${metricRow('유통가능물량', fmtPct(ipo.floatRatio), g.float)}
+      </tbody>
+    </table>
+    <p class="card-meta">${metaParts.join(' · ')}</p>
   </article>`;
 }
 
-// 노출 대상 필터 + 정렬
-function visibleIpos() {
-  const today = todayStr();
-  const filtered = state.ipos.filter((ipo) => {
-    if (ipo.confirmedPrice == null) return false; // 미확정 공모가 제외
-    if (!state.showSpac && ipo.isSpac) return false; // 스팩 기본 제외
-    const isPast = !ipo.subscribeEnd || ipo.subscribeEnd < today;
-    if (state.tab === 'active' && isPast) return false;
-    if (state.tab === 'past' && !isPast) return false;
-    if (
-      state.recommendOnly &&
-      ipo.grade.verdict !== '퍼펙트' &&
-      ipo.grade.verdict !== '청약 고려'
-    )
-      return false;
-    return true;
-  });
+// ── 렌더: 지난 공모 표 ───────────────────────────────
+function pastRowHtml(ipo) {
+  const g = ipo.grade;
+  const url = safeUrl(ipo.detailUrl);
+  const spac = ipo.isSpac ? '<span class="past-spac">스팩</span>' : '';
+  const attrs = url
+    ? ` data-href="${escapeHtml(url)}" tabindex="0" role="link" aria-label="${escapeHtml(ipo.name)} 상세 보기"`
+    : '';
+  return `<tr class="past-row"${attrs}>
+    <td class="past-name">${escapeHtml(ipo.name)}${spac}</td>
+    <td class="num">${fmtNum(ipo.confirmedPrice)}</td>
+    <td><span class="verdict-mini tone-${verdictTone(g.verdict)}">${escapeHtml(g.verdict)}</span></td>
+    <td class="num">${fmtDay(ipo.listingDate) || '미정'}</td>
+  </tr>`;
+}
 
+function pastTableHtml(list) {
+  return `<table class="past-table">
+    <caption class="sr-only">지난 공모 목록</caption>
+    <thead><tr>
+      <th scope="col">종목명</th><th scope="col">확정가</th><th scope="col">판정</th><th scope="col">상장</th>
+    </tr></thead>
+    <tbody>${list.map(pastRowHtml).join('')}</tbody>
+  </table>`;
+}
+
+// ── 필터 (탭별 정렬은 render 에서) ────────────────────
+function passesFilter(ipo) {
+  if (ipo.confirmedPrice == null) return false; // 미확정 공모가 제외
+  if (!state.showSpac && ipo.isSpac) return false; // 스팩 기본 제외
+  if (
+    state.recommendOnly &&
+    ipo.grade.verdict !== '퍼펙트' &&
+    ipo.grade.verdict !== '청약 고려'
+  )
+    return false;
+  return true;
+}
+
+function emptyMsg() {
   if (state.tab === 'active') {
-    // 청약중 최상단 → 청약 시작일 오름차순
-    filtered.sort((a, b) => {
-      const sa = isSubscribing(a) ? 0 : 1;
-      const sb = isSubscribing(b) ? 0 : 1;
-      if (sa !== sb) return sa - sb;
-      return (a.subscribeStart ?? '').localeCompare(b.subscribeStart ?? '');
-    });
-  } else {
-    // 최신순 (청약 종료일 내림차순)
-    filtered.sort((a, b) => (b.subscribeEnd ?? '').localeCompare(a.subscribeEnd ?? ''));
+    return state.recommendOnly
+      ? '지금 추천할 만한 공모주가 없어요.'
+      : '지금 청약할 수 있는 공모주가 없어요.';
   }
-  return filtered;
+  return '지난 공모 내역이 없어요.';
 }
 
 function render() {
-  const list = visibleIpos();
   listEl.setAttribute('aria-busy', 'false');
-  if (list.length === 0) {
-    const msg =
-      state.tab === 'active'
-        ? state.recommendOnly
-          ? '지금 추천할 만한 공모주가 없어요.'
-          : '지금 청약할 수 있는 공모주가 없어요.'
-        : '지난 공모 내역이 없어요.';
-    listEl.innerHTML = `<div class="empty">${msg}</div>`;
-    return;
+  const today = todayStr();
+  const pool = state.ipos.filter(passesFilter);
+
+  if (state.tab === 'active') {
+    const active = pool.filter((i) => i.subscribeEnd && i.subscribeEnd >= today);
+    if (active.length === 0) {
+      listEl.innerHTML = `<div class="empty">${emptyMsg()}</div>`;
+      return;
+    }
+    // 그룹: 지금 청약 중(마감 임박순) / 청약 예정(시작일순)
+    const now = active
+      .filter((i) => !isUpcoming(i))
+      .sort((a, b) => (a.subscribeEnd ?? '').localeCompare(b.subscribeEnd ?? ''));
+    const soon = active
+      .filter(isUpcoming)
+      .sort((a, b) => (a.subscribeStart ?? '').localeCompare(b.subscribeStart ?? ''));
+    let html = '';
+    if (now.length) html += `<h2 class="section-head">지금 청약 중</h2>` + now.map(cardHtml).join('');
+    if (soon.length) html += `<h2 class="section-head">청약 예정</h2>` + soon.map(cardHtml).join('');
+    listEl.innerHTML = html;
+  } else {
+    // 지난 공모: subscribeEnd < 오늘, 최신순
+    const past = pool
+      .filter((i) => !i.subscribeEnd || i.subscribeEnd < today)
+      .sort((a, b) => (b.subscribeEnd ?? '').localeCompare(a.subscribeEnd ?? ''));
+    if (past.length === 0) {
+      listEl.innerHTML = `<div class="empty">${emptyMsg()}</div>`;
+      return;
+    }
+    listEl.innerHTML = pastTableHtml(past);
   }
-  listEl.innerHTML = list.map(cardHtml).join('');
 }
 
 // ── 데이터 로드 ───────────────────────────────────────
@@ -285,6 +322,23 @@ function updateBadge() {
     else navigator.clearAppBadge?.().catch(() => {});
   }
 }
+
+// ── 지난 공모 표: 행 전체 링크(터치·키보드) ──────────
+function openRow(row) {
+  const href = row?.dataset?.href;
+  if (href) window.open(href, '_blank', 'noopener');
+}
+listEl.addEventListener('click', (e) => {
+  const row = e.target.closest('.past-row');
+  if (row) openRow(row);
+});
+listEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('.past-row');
+  if (!row) return;
+  e.preventDefault();
+  openRow(row);
+});
 
 // ── 탭 / 필터 이벤트 ──────────────────────────────────
 $('#segment').addEventListener('click', (e) => {
