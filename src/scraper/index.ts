@@ -10,7 +10,7 @@ import {
 } from '../db.js';
 import { sendToAll } from '../push.js';
 import { delay, fetchEucKr } from './fetch.js';
-import { extractFloatRatio } from './llm-float.js';
+import { extractFloatByRule, extractFloatRatio } from './llm-float.js';
 import { parseDetailHtml } from './parse-detail.js';
 import { parseListHtml } from './parse-list.js';
 import type { IpoRow, ListEntry } from '../types.js';
@@ -119,9 +119,8 @@ export async function runScrape(opts: {
   let processed = 0;
   let floatReused = 0;
 
-  // 유통가능물량은 증권신고서에 한 번 확정되면 바뀌지 않는다.
-  // 이미 채워진 종목까지 매일 다시 물어보면 돈·시간만 쓰고 값이 흔들릴 위험만 생기므로,
-  // 기존 값이 있으면 그대로 재사용하고 LLM 은 비어 있는 종목에만 쓴다.
+  // 이미 채워진 종목까지 매일 모델에 다시 물어보면 돈·시간만 쓰고 값이 흔들릴 위험만 생긴다.
+  // 그래서 모델 호출은 "규칙도 실패하고 기존 값도 없는" 종목에만 남긴다.
   const prevById = new Map(existingBefore.map((r) => [r.id, r]));
 
   for (let i = 0; i < targets.length; i++) {
@@ -136,9 +135,16 @@ export async function runScrape(opts: {
       await delay();
       const detailHtml = await fetchEucKr(e.detailUrl);
       const detail = parseDetailHtml(detailHtml);
+      // 규칙 추출은 공짜(외부 호출 0회, 1ms 미만)이므로 매번 다시 계산한다.
+      // 그래야 예전에 잘못 저장된 값도 다음 수집에서 스스로 바로잡힌다.
       const prevFloat = prevById.get(e.id)?.floatRatio ?? null;
-      const floatRatio = prevFloat ?? (await extractFloatRatio(detail.floatSectionText));
-      if (prevFloat != null) floatReused++;
+      const byRule = detail.floatSectionText
+        ? extractFloatByRule(detail.floatSectionText)
+        : null;
+      // 규칙이 못 찾을 때만 기존 값을 재사용하고, 그것도 없을 때만 모델에 묻는다
+      if (byRule == null && prevFloat != null) floatReused++;
+      const floatRatio =
+        byRule ?? prevFloat ?? (await extractFloatRatio(detail.floatSectionText));
       if (floatRatio == null) floatNull++;
       else floatOk++;
 
