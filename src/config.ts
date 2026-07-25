@@ -32,6 +32,9 @@ export const config = {
     delayMs: num('SCRAPE_DELAY_MS', 800),
     // 1회 호출당 상세+LLM 처리 최대 건수(나머지는 다음 호출에서 이어서 처리)
     detailBatch: num('SCRAPE_DETAIL_BATCH', 80),
+    // 시간 예산: 서버리스 함수 상한(300초)에 걸려 통째로 죽으면 수집 기록조차 남지 않는다.
+    // 이 시간을 넘기면 남은 종목은 다음 실행에 넘기고 정상 종료한다(미완성 종목 우선 정렬이라 이어서 채워짐).
+    deadlineMs: num('SCRAPE_DEADLINE_MS', 240_000),
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ipo-calculator/1.0 (personal-use)',
     listUrl: 'https://www.38.co.kr/html/fund/index.htm?o=k',
@@ -47,6 +50,10 @@ export const config = {
     //   deepseek/deepseek-v4-flash 29/32(빈값 3) · $0.000305/건 (프롬프트 개선 후엔 16/16)
     model: str('OPENROUTER_MODEL', 'amazon/nova-micro-v1'),
     baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    // 한 번의 추출 요청을 기다려 줄 최대 시간(실측 평균 0.6~1.5초라 15초면 넉넉)
+    timeoutMs: num('OPENROUTER_TIMEOUT_MS', 15_000),
+    // 429(요청 과다)·5xx 뒤 다시 시도하기 전 대기(테스트에서는 짧게 낮춰 쓴다)
+    retryDelayMs: num('OPENROUTER_RETRY_MS', 2_000),
   },
 
   vapid: {

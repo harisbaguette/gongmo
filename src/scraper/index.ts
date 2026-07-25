@@ -23,6 +23,11 @@ export interface ScrapeResult {
   detailFail: number;
   floatOk: number;
   floatNull: number;
+  /** 기존 값을 그대로 쓴 건수(LLM 호출 안 함) */
+  floatReused: number;
+  /** 시간 예산에 걸려 남기고 종료했는지(남은 건수는 다음 실행에서 이어서 처리) */
+  stoppedEarly: boolean;
+  remaining: number;
   startedAt: string;
   finishedAt: string;
 }
@@ -108,13 +113,32 @@ export async function runScrape(opts: {
   let floatOk = 0;
   let floatNull = 0;
 
+  // 시간 예산: 넘기면 남은 종목을 다음 실행에 넘기고 정상 종료(수집 기록은 남긴다)
+  const deadlineAt = Date.now() + config.scrape.deadlineMs;
+  let stoppedEarly = false;
+  let processed = 0;
+  let floatReused = 0;
+
+  // 유통가능물량은 증권신고서에 한 번 확정되면 바뀌지 않는다.
+  // 이미 채워진 종목까지 매일 다시 물어보면 돈·시간만 쓰고 값이 흔들릴 위험만 생기므로,
+  // 기존 값이 있으면 그대로 재사용하고 LLM 은 비어 있는 종목에만 쓴다.
+  const prevById = new Map(existingBefore.map((r) => [r.id, r]));
+
   for (let i = 0; i < targets.length; i++) {
+    if (Date.now() > deadlineAt) {
+      stoppedEarly = true;
+      log(`시간 예산 초과 — 남은 ${targets.length - i}건은 다음 실행에서 이어서 처리`);
+      break;
+    }
+    processed++;
     const e = targets[i];
     try {
       await delay();
       const detailHtml = await fetchEucKr(e.detailUrl);
       const detail = parseDetailHtml(detailHtml);
-      const floatRatio = await extractFloatRatio(detail.floatSectionText);
+      const prevFloat = prevById.get(e.id)?.floatRatio ?? null;
+      const floatRatio = prevFloat ?? (await extractFloatRatio(detail.floatSectionText));
+      if (prevFloat != null) floatReused++;
       if (floatRatio == null) floatNull++;
       else floatOk++;
 
@@ -151,6 +175,9 @@ export async function runScrape(opts: {
       detailFail,
       floatOk,
       floatNull,
+      floatReused,
+      stoppedEarly,
+      remaining: targets.length - processed,
     }),
   );
 
@@ -162,6 +189,9 @@ export async function runScrape(opts: {
     detailFail,
     floatOk,
     floatNull,
+    floatReused,
+    stoppedEarly,
+    remaining: targets.length - processed,
     startedAt,
     finishedAt,
   };
