@@ -10,7 +10,7 @@ import {
 } from '../db.js';
 import { sendToAll } from '../push.js';
 import { delay, fetchEucKr } from './fetch.js';
-import { extractFloatByRule, extractFloatRatio } from './llm-float.js';
+import { crossCheckFloat, extractFloatByRule, extractFloatRatio } from './llm-float.js';
 import { parseDetailHtml } from './parse-detail.js';
 import { parseListHtml } from './parse-list.js';
 import type { IpoRow, ListEntry } from '../types.js';
@@ -25,6 +25,8 @@ export interface ScrapeResult {
   floatNull: number;
   /** 기존 값을 그대로 쓴 건수(LLM 호출 안 함) */
   floatReused: number;
+  /** 규칙 값과 모델 값이 달라 사람 확인이 필요한 건수 */
+  floatMismatch: number;
   /** 시간 예산에 걸려 남기고 종료했는지(남은 건수는 다음 실행에서 이어서 처리) */
   stoppedEarly: boolean;
   remaining: number;
@@ -118,6 +120,7 @@ export async function runScrape(opts: {
   let stoppedEarly = false;
   let processed = 0;
   let floatReused = 0;
+  let floatMismatch = 0;
 
   // 이미 채워진 종목까지 매일 모델에 다시 물어보면 돈·시간만 쓰고 값이 흔들릴 위험만 생긴다.
   // 그래서 모델 호출은 "규칙도 실패하고 기존 값도 없는" 종목에만 남긴다.
@@ -145,6 +148,15 @@ export async function runScrape(opts: {
       if (byRule == null && prevFloat != null) floatReused++;
       const floatRatio =
         byRule ?? prevFloat ?? (await extractFloatRatio(detail.floatSectionText));
+
+      // 처음 값을 채우는 종목은 모델에게 한 번 되물어 교차 확인한다(서식이 회사마다 달라서).
+      // 값은 규칙 쪽을 쓰고, 다르면 기록만 남겨 사람이 확인할 수 있게 한다.
+      if (byRule != null && prevFloat == null && detail.floatSectionText) {
+        if (await crossCheckFloat(detail.floatSectionText, byRule)) {
+          floatMismatch++;
+          log(`⚠ ${e.name} 유통물량 교차확인 불일치 — 규칙 ${byRule}% (원문 확인 필요)`);
+        }
+      }
       if (floatRatio == null) floatNull++;
       else floatOk++;
 
@@ -182,6 +194,7 @@ export async function runScrape(opts: {
       floatOk,
       floatNull,
       floatReused,
+      floatMismatch,
       stoppedEarly,
       remaining: targets.length - processed,
     }),
@@ -196,6 +209,7 @@ export async function runScrape(opts: {
     floatOk,
     floatNull,
     floatReused,
+    floatMismatch,
     stoppedEarly,
     remaining: targets.length - processed,
     startedAt,

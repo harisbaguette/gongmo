@@ -58,23 +58,33 @@ export function extractFloatByRule(sectionText: string): number | null {
   }));
 
   // 짝 후보: 붙어 있고(같은 행) 합이 100%인 지분율 쌍
-  const pairs: { value: number; at: number }[] = [];
+  const pairs: { value: number; at: number; gap: number }[] = [];
   for (let k = 1; k < pcts.length; k++) {
     const a = pcts[k - 1];
     const b = pcts[k];
     if (a.v === 100 || b.v === 100) continue; // 100% 는 합계 자체(주식수 열)라 짝이 아니다
-    if (Math.abs(a.v + b.v - 100) > 0.02) continue; // 두 값의 합이 100%
+    const gap = Math.abs(a.v + b.v - 100);
+    if (gap > 0.02) continue; // 두 값의 합이 100%(공시 반올림 오차 허용)
     if (b.i - a.i > 60) continue; // 같은 행 안에 붙어 있어야 한다
-    pairs.push({ value: b.v, at: a.i }); // 뒤쪽(b) = 유통가능물량
+    pairs.push({ value: b.v, at: a.i, gap }); // 뒤쪽(b) = 유통가능물량
   }
   if (pairs.length === 0) return null;
 
   // 합계 행 뒤에 "…유통물량은 48.97%에서 38.39%로 감소" 같은 설명문이 붙는 공시가 있다.
-  // 그래서 마지막 합계 표기를 기준점으로 잡고, 그 **직후** 짝을 답으로 쓴다.
+  // 그래서 마지막 합계 표기를 기준점으로 잡고 그 뒤 후보만 본다.
   const totalKey = [...flat.matchAll(/합\s*계|총\s*계/g)].map((m) => m.index ?? -1).pop() ?? -1;
-  const afterTotal = totalKey >= 0 ? pairs.find((p) => p.at > totalKey) : undefined;
-  const answer = (afterTotal ?? pairs[pairs.length - 1]).value;
-  return answer >= 0 && answer <= 100 ? answer : null;
+  const after = totalKey >= 0 ? pairs.filter((p) => p.at > totalKey) : [];
+  const pool = after.length > 0 ? after : pairs;
+
+  // 합계 행이 두 줄로 쪼개져 99.99% 짝과 100.00% 짝이 함께 나오는 공시가 있다(2209 그래피).
+  // 이럴 땐 합이 100%에 더 정확히 맞는 쪽이 최종 합계다.
+  // 똑같이 정확하면 **앞쪽**을 쓴다 — 뒤에 오는 것은 대개 "…유통물량이 45%에서 55%로 바뀝니다"
+  // 같은 설명문이라, 뒤쪽을 고르면 표가 아니라 문장을 읽는 셈이 된다.
+  let best = pool[0];
+  for (const p of pool) {
+    if (p.gap < best.gap - 1e-9) best = p;
+  }
+  return best.value >= 0 && best.value <= 100 ? best.value : null;
 }
 
 /** 잠깐 뒤 다시 하면 될 만한 실패(429 요청 과다·5xx 서버오류·타임아웃) */
@@ -148,6 +158,25 @@ async function extractOnce(sectionText: string): Promise<number | null> {
     }
   }
   return null;
+}
+
+/**
+ * 규칙이 뽑은 값을 모델에게 한 번 되물어 교차 확인한다(신규 종목 최초 1회용).
+ *
+ * 서식은 회사마다 다르므로, 규칙이 낯선 표를 잘못 읽을 가능성을 0으로 볼 수 없다.
+ * 값은 규칙 쪽을 쓰되(실측 53건에서 규칙 51/51 정답, 모델은 30건 중 4건 오답),
+ * 서로 다르면 기록을 남겨 나중에 사람이 확인할 수 있게 한다.
+ * @returns true = 서로 다름(확인 필요), false = 같거나 모델이 답을 못 냄
+ */
+export async function crossCheckFloat(sectionText: string, ruleValue: number): Promise<boolean> {
+  if (!isLlmConfigured()) return false;
+  try {
+    const byModel = await callOnce(sectionText);
+    if (byModel == null) return false;
+    return Math.abs(byModel - ruleValue) >= 0.005;
+  } catch {
+    return false;
+  }
 }
 
 /**
