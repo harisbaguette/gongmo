@@ -81,8 +81,22 @@ api.get('/config', (_req, res) => {
 });
 
 // 헬스체크
+// build 는 "지금 배포된 코드가 어느 버전인지"를 눈으로 확인하기 위한 표식이다.
+// (Vercel 환경변수는 가려져 있고 배포 로그로는 코드 내용을 알 수 없어, 배포 확인이 불가능했다.
+//  추출 방식이 바뀌면 이 문자열도 함께 바꿔서 배포 반영 여부를 즉시 확인한다.)
+export const BUILD_MARKER = 'float-rule-first-2026-07-25';
+
 api.get('/health', (_req, res) => {
-  res.json({ data: { ok: true, ts: new Date().toISOString() }, error: null });
+  res.json({
+    data: {
+      ok: true,
+      ts: new Date().toISOString(),
+      build: BUILD_MARKER,
+      llmConfigured: isLlmConfigured(),
+      floatExtractor: 'rule-first (모델은 예비)',
+    },
+    error: null,
+  });
 });
 
 // 푸시 구독 등록
