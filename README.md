@@ -89,7 +89,7 @@ npm run scrape 5        # 상세는 앞 5건만 (빠른 테스트)
 | `SCRAPE_DELAY_MS` | 800 | 상세 요청 간 딜레이(서버리스 300초 제한 대응) |
 | `SCRAPE_DETAIL_BATCH` | 80 | 1회 호출당 상세+LLM 처리 최대 건수(초과분은 다음 호출에서 이어서) |
 | `OPENROUTER_API_KEY` | — | 유통물량 추출용(없으면 해당 값 null) |
-| `OPENROUTER_MODEL` | `deepseek/deepseek-chat` | 사용 모델 |
+| `OPENROUTER_MODEL` | `amazon/nova-micro-v1` | 사용 모델(실측 비교로 선정 — 아래 표 참고) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | — | 웹푸시 키(`gen:vapid`) |
 | `VAPID_SUBJECT` | — | `mailto:본인이메일` |
 | `NOTIFY_HOUR` / `NOTIFY_MINUTE` | 8 / 30 | 아침 알림 시각(외부 스케줄러 등록 시각과 맞춤) |
@@ -97,6 +97,25 @@ npm run scrape 5        # 상세는 앞 5건만 (빠른 테스트)
 | `NOTIFY_ALL` | false | true면 전체 종목, false면 퍼펙트/청약 고려만 알림 |
 
 > ⚠️ `.env` 는 **절대 커밋하지 마세요**(`.gitignore`에 포함됨). 시크릿은 오직 `.env` 또는 배포 플랫폼의 환경 변수 설정에만 둡니다.
+
+### LLM 모델 선정 근거 (실측, 2026-07-25)
+
+38.co.kr 실제 공시 **16건**의 "공모후 유통가능물량" 표로 각 모델을 돌려, 사람이 합계 행을 직접 읽어 만든 정답과 대조했다.
+운영 코드와 똑같이 *빈값이면 1회 재시도* 규칙을 적용한 32콜 기준.
+
+| 모델 | 정답 | 1건 비용 | 평균 응답 | 비고 |
+|---|---|---|---|---|
+| **amazon/nova-micro-v1** | **32/32** | **$0.000115** | 534ms | **채택** — 100% 정확, 요청 거절 없음 |
+| mistralai/mistral-nemo | 32/32 | $0.000053 | 535ms | 가장 싸지만 429(요청 과다) 빈발 → 운영 위험 |
+| deepseek/deepseek-chat | 31/32 | $0.000459 | 1042ms | 이전 기본값. 매각제한 지분율을 유통물량으로 잘못 읽은 사례 1건 |
+| deepseek/deepseek-v4-flash | 29/32 | $0.000305 | 1619ms | 빈값 3건(개선된 프롬프트에서는 16/16으로 회복) |
+| google/gemma-3-12b-it | 30/32 | $0.000149 | 218ms | 프롬프트의 예시 숫자를 그대로 베끼는 오답 |
+| inclusionai/ling-2.6-flash | 17/32 | $0.000030 | 646ms | 빈값 과다 |
+| openai/gpt-oss-20b | 0/10 | $0.000089 | 376ms | 사실상 추출 불가 |
+
+- 연간 비용은 어느 쪽이든 **$0.1 미만**이라 사실상 무료다. 따라서 선택 기준은 가격이 아니라 **정확도와 거절률**이다.
+- 잘못된 유통물량 값은 등급을 조용히 오염시키므로, "싸지만 가끔 틀리는" 모델은 쓰지 않는다.
+- 프롬프트에 **예시 지분율 숫자를 넣지 않는다** — 저가 모델이 그 숫자를 그대로 베낀다(`src/scraper/llm-float.ts` 주석 참고).
 
 ---
 
@@ -140,7 +159,7 @@ vercel link                     # GitHub 저장소 또는 로컬 폴더 연결
 # 환경 변수 등록 (Production/Preview 모두)
 vercel env add DATABASE_URL
 vercel env add OPENROUTER_API_KEY
-vercel env add OPENROUTER_MODEL          # (선택, 기본 deepseek/deepseek-chat)
+vercel env add OPENROUTER_MODEL          # (선택, 기본 amazon/nova-micro-v1)
 vercel env add VAPID_PUBLIC_KEY
 vercel env add VAPID_PRIVATE_KEY
 vercel env add VAPID_SUBJECT             # mailto:본인이메일

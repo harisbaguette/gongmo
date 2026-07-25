@@ -40,7 +40,12 @@ export const config = {
 
   openRouter: {
     apiKey: str('OPENROUTER_API_KEY'),
-    model: str('OPENROUTER_MODEL', 'deepseek/deepseek-chat'),
+    // 실측 비교(2026-07-25, 실제 공시 16건×2회 = 32콜, 운영과 동일한 재시도 포함):
+    //   amazon/nova-micro-v1     32/32 정답 · $0.000115/건 · 534ms  ← 채택
+    //   mistralai/mistral-nemo   32/32 정답 · $0.000053/건 이지만 429(요청 과다) 빈발
+    //   deepseek/deepseek-chat   31/32 (매각제한 지분율 오답 1) · $0.000459/건 ← 이전 기본값
+    //   deepseek/deepseek-v4-flash 29/32(빈값 3) · $0.000305/건 (프롬프트 개선 후엔 16/16)
+    model: str('OPENROUTER_MODEL', 'amazon/nova-micro-v1'),
     baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
   },
 
